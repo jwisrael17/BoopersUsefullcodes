@@ -8,4 +8,10 @@ divisions=5  # Must be a positive integer.
 read -r -a numbers <<< "$(awk -v s="$start" -v e="$end" -v n="$divisions" \
   'BEGIN { for (i=0; i<=n; i++) printf "%.10g ", s+(e-s)*i/n }')"
 
-printf '%s\n' "${numbers[@]}"
+printf '['
+separator=''
+for number in "${numbers[@]}"; do
+    printf '%s%s' "$separator" "$number"
+    separator=','
+done
+printf ']\n'
