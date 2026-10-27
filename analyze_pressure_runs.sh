@@ -9,5 +9,5 @@ for folder in run_pressure_*; do
     [[ "$folder" =~ ^run_pressure_[0-9]+([.][0-9]+)?$ ]] || continue
 
     python "$script_dir/BurnRate.py" \
-        "$folder" --name-pattern 'run_pressure_{pressure}'
+        "$folder"
 done

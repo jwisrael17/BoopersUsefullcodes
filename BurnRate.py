@@ -3,9 +3,6 @@ import argparse
 import csv
 import glob
 import os
-import re
-import string
-import tempfile
 import sys
 
 import numpy as np
@@ -21,34 +18,6 @@ RESULT_COLUMNS = [
     "burn_rate_in_per_s",
     "number_of_points_used",
 ]
-
-
-def extract_name_values(output_folder, pattern):
-    """Capture named placeholders from a folder name, e.g. run_{pressure}."""
-    if pattern is None:
-        return {}
-
-    parts = []
-    fields = []
-    for literal, field, spec, conversion in string.Formatter().parse(pattern):
-        parts.append(re.escape(literal))
-        if field is not None:
-            if not field.isidentifier() or spec or conversion:
-                raise ValueError("Use simple named placeholders such as {pressure}")
-            if field in fields or field in RESULT_COLUMNS:
-                raise ValueError(f"Duplicate or reserved column name: {field}")
-            if parts and parts[-1] == "" and fields:
-                raise ValueError("Separate placeholders with literal text, such as an underscore")
-            fields.append(field)
-            parts.append(f"(?P<{field}>.+?)")
-
-    if not fields:
-        raise ValueError("The name pattern must include a placeholder such as {pressure}")
-    folder_name = Path(output_folder).expanduser().resolve().name
-    match = re.fullmatch("".join(parts), folder_name)
-    if match is None:
-        raise ValueError(f"Folder name {folder_name!r} does not match pattern {pattern!r}")
-    return match.groupdict()
 
 
 def find_field(ds, field_name):
@@ -122,52 +91,24 @@ def calculate_burn_rate(output_folder):
     return output_folder, burn_rate_m_per_s, burn_rate_in_per_s, len(samples)
 
 
-def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples,
-                  name_values=None):
-    name_values = name_values or {}
-    columns = RESULT_COLUMNS + list(name_values)
+def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples):
+    columns = RESULT_COLUMNS
     table_exists = RESULT_TABLE.exists() and RESULT_TABLE.stat().st_size > 0
-
     if table_exists:
         with RESULT_TABLE.open(newline="") as stream:
-            reader = csv.DictReader(stream)
-            existing_columns = reader.fieldnames or []
-            if not set(RESULT_COLUMNS).issubset(existing_columns):
-                raise ValueError(f"Unexpected CSV columns in {RESULT_TABLE}")
-            columns = existing_columns + [c for c in columns if c not in existing_columns]
-            if columns != existing_columns:
-                old_rows = list(reader)
-            else:
-                old_rows = None
-
-        if old_rows is not None:
-            # Replace only after the expanded table has been written successfully.
-            temporary_path = None
-            try:
-                with tempfile.NamedTemporaryFile(
-                    mode="w", newline="", dir=RESULT_TABLE.parent, delete=False
-                ) as stream:
-                    temporary_path = Path(stream.name)
-                    writer = csv.DictWriter(stream, fieldnames=columns)
-                    writer.writeheader()
-                    writer.writerows(old_rows)
-                os.replace(temporary_path, RESULT_TABLE)
-            finally:
-                if temporary_path is not None and temporary_path.exists():
-                    temporary_path.unlink()
+            columns = next(csv.reader(stream))
+        if not set(RESULT_COLUMNS).issubset(columns):
+            raise ValueError(f"Unexpected CSV columns in {RESULT_TABLE}")
 
     with RESULT_TABLE.open("a", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
-
         if not table_exists:
             writer.writeheader()
-
         writer.writerow({
-            "data_file_name": str(output_folder),
+            "data_file_name": Path(output_folder).name,
             "burn_rate_m_per_s": f"{burn_rate_m_per_s:.8g}",
             "burn_rate_in_per_s": f"{burn_rate_in_per_s:.8g}",
             "number_of_points_used": samples,
-            **name_values,
         })
 
 
@@ -175,12 +116,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "output_folder", nargs="+",
-        help="ALAMO output folders or quoted wildcard patterns, e.g. 'run_pressure_*'",
-    )
-    parser.add_argument(
-        "--name-pattern",
-        help="Folder naming convention, e.g. 'run_pressure_{pressure}'. "
-             "Each named placeholder becomes a CSV column. Quote the pattern.",
+        help="ALAMO output folders or quoted wildcard patterns, e.g. 'run_*'",
     )
     args = parser.parse_args()
     folders = {}
@@ -192,30 +128,24 @@ def main():
     if not folders:
         parser.error(f"No folders matched {args.output_folder!r} in {Path.cwd()}")
 
-    # Validate names before starting any calculations or writing results.
-    try:
-        runs = [(folder, extract_name_values(folder, args.name_pattern))
-                for folder in folders]
-    except ValueError as error:
-        parser.error(str(error))
+    runs = list(folders)
 
     print(f"Found {len(runs)} matching folder(s).", flush=True)
     failures = 0
-    for index, (folder, name_values) in enumerate(runs, start=1):
+    for index, folder in enumerate(runs, start=1):
         print(f"[{index}/{len(runs)}] Analyzing {folder}", flush=True)
         try:
             output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples = (
                 calculate_burn_rate(folder)
             )
             append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s,
-                          samples, name_values)
+                          samples)
         except Exception as error:
             failures += 1
             print(f"Failed {folder}: {error}", file=sys.stderr, flush=True)
             continue
 
-        for name, value in name_values.items():
-            print(f"{name}: {value}")
+        print(f"Folder name: {output_folder.name}")
         print(f"Burn rate:  {burn_rate_m_per_s:.8g} m/s")
         print(f"Burn rate:  {burn_rate_in_per_s:.8g} in/s")
         print(f"Saved row to: {RESULT_TABLE}", flush=True)
