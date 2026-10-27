@@ -1,10 +1,12 @@
 from pathlib import Path
 import argparse
 import csv
+import glob
 import os
 import re
 import string
 import tempfile
+import sys
 
 import numpy as np
 import yt
@@ -99,7 +101,8 @@ def calculate_burn_rate(output_folder):
 
     samples = []
 
-    for plotfile in plotfiles:
+    for index, plotfile in enumerate(plotfiles, start=1):
+        print(f"  Plotfile {index}/{len(plotfiles)}: {plotfile.name}", flush=True)
         time, position = front_position(plotfile)
 
         if position is not None:
@@ -170,32 +173,56 @@ def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples,
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("output_folder", help="Path to an ALAMO output folder")
+    parser.add_argument(
+        "output_folder", nargs="+",
+        help="ALAMO output folders or quoted wildcard patterns, e.g. 'run_pressure_*'",
+    )
     parser.add_argument(
         "--name-pattern",
         help="Folder naming convention, e.g. 'run_pressure_{pressure}'. "
              "Each named placeholder becomes a CSV column. Quote the pattern.",
     )
     args = parser.parse_args()
+    folders = {}
+    for pattern in args.output_folder:
+        for match in sorted(glob.glob(os.path.expanduser(pattern))):
+            folder = Path(match).resolve()
+            if folder.is_dir():
+                folders[folder] = None
+    if not folders:
+        parser.error(f"No folders matched {args.output_folder!r} in {Path.cwd()}")
+
+    # Validate names before starting any calculations or writing results.
     try:
-        name_values = extract_name_values(args.output_folder, args.name_pattern)
+        runs = [(folder, extract_name_values(folder, args.name_pattern))
+                for folder in folders]
     except ValueError as error:
         parser.error(str(error))
 
-    output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples = calculate_burn_rate(
-        args.output_folder
-    )
+    print(f"Found {len(runs)} matching folder(s).", flush=True)
+    failures = 0
+    for index, (folder, name_values) in enumerate(runs, start=1):
+        print(f"[{index}/{len(runs)}] Analyzing {folder}", flush=True)
+        try:
+            output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples = (
+                calculate_burn_rate(folder)
+            )
+            append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s,
+                          samples, name_values)
+        except Exception as error:
+            failures += 1
+            print(f"Failed {folder}: {error}", file=sys.stderr, flush=True)
+            continue
 
-    append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples,
-                  name_values)
+        for name, value in name_values.items():
+            print(f"{name}: {value}")
+        print(f"Burn rate:  {burn_rate_m_per_s:.8g} m/s")
+        print(f"Burn rate:  {burn_rate_in_per_s:.8g} in/s")
+        print(f"Saved row to: {RESULT_TABLE}", flush=True)
 
-    print(f"Data folder: {output_folder}")
-    for name, value in name_values.items():
-        print(f"{name}: {value}")
-    print(f"Burn rate:  {burn_rate_m_per_s:.8g} m/s")
-    print(f"Burn rate:  {burn_rate_in_per_s:.8g} in/s")
-    print(f"Saved row to: {RESULT_TABLE}")
+    print(f"Completed: {len(runs) - failures}; failed: {failures}.", flush=True)
+    return 1 if failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
