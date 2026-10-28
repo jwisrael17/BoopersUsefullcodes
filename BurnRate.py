@@ -4,6 +4,7 @@ import csv
 import glob
 import os
 import sys
+import tempfile
 
 import numpy as np
 import yt
@@ -17,6 +18,7 @@ RESULT_COLUMNS = [
     "burn_rate_m_per_s",
     "burn_rate_in_per_s",
     "number_of_points_used",
+    "time",
 ]
 
 
@@ -91,14 +93,31 @@ def calculate_burn_rate(output_folder):
     return output_folder, burn_rate_m_per_s, burn_rate_in_per_s, len(samples)
 
 
-def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples):
+def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples, time_value):
     columns = RESULT_COLUMNS
     table_exists = RESULT_TABLE.exists() and RESULT_TABLE.stat().st_size > 0
     if table_exists:
         with RESULT_TABLE.open(newline="") as stream:
-            columns = next(csv.reader(stream))
-        if not set(RESULT_COLUMNS).issubset(columns):
-            raise ValueError(f"Unexpected CSV columns in {RESULT_TABLE}")
+            reader = csv.DictReader(stream)
+            columns = reader.fieldnames or []
+            if not set(RESULT_COLUMNS[:-1]).issubset(columns):
+                raise ValueError(f"Unexpected CSV columns in {RESULT_TABLE}")
+            old_rows = list(reader) if "time" not in columns else None
+        if old_rows is not None:
+            columns = columns + ["time"]
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    mode="w", newline="", dir=RESULT_TABLE.parent, delete=False
+                ) as stream:
+                    temporary_path = Path(stream.name)
+                    writer = csv.DictWriter(stream, fieldnames=columns)
+                    writer.writeheader()
+                    writer.writerows(old_rows)
+                os.replace(temporary_path, RESULT_TABLE)
+            finally:
+                if temporary_path is not None and temporary_path.exists():
+                    temporary_path.unlink()
 
     with RESULT_TABLE.open("a", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=columns)
@@ -109,6 +128,7 @@ def append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s, samples)
             "burn_rate_m_per_s": f"{burn_rate_m_per_s:.8g}",
             "burn_rate_in_per_s": f"{burn_rate_in_per_s:.8g}",
             "number_of_points_used": samples,
+            "time": time_value,
         })
 
 
@@ -117,6 +137,10 @@ def main():
     parser.add_argument(
         "output_folder", nargs="+",
         help="ALAMO output folders or quoted wildcard patterns, e.g. 'run_*'",
+    )
+    parser.add_argument(
+        "time", type=float,
+        help="Numeric time value to save in the table for each matched folder",
     )
     args = parser.parse_args()
     folders = {}
@@ -139,13 +163,14 @@ def main():
                 calculate_burn_rate(folder)
             )
             append_result(output_folder, burn_rate_m_per_s, burn_rate_in_per_s,
-                          samples)
+                          samples, args.time)
         except Exception as error:
             failures += 1
             print(f"Failed {folder}: {error}", file=sys.stderr, flush=True)
             continue
 
         print(f"Folder name: {output_folder.name}")
+        print(f"Time: {args.time}")
         print(f"Burn rate:  {burn_rate_m_per_s:.8g} m/s")
         print(f"Burn rate:  {burn_rate_in_per_s:.8g} in/s")
         print(f"Saved row to: {RESULT_TABLE}", flush=True)
