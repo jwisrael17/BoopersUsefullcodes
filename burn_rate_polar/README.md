@@ -1,5 +1,34 @@
 # Burn-rate orientation comparison
 
+## Your h,k,l CSV
+
+Save your measurements with these headers (the spelling `expermental` is accepted):
+
+```csv
+h,k,l,expermental,simulated
+1,0,0,2.0,2.1
+1,1,0,2.5,2.6
+1,1,1,2.7,2.8
+0,1,0,3.0,2.9
+```
+
+Run with the CSV path as the argument:
+
+```bash
+python3 plot_burn_rate.py "My material.csv"
+```
+
+This uses **My material** as the plot title and saves
+`polar_plots/My material_polar.png`. Each CSV gets its own filename as its title,
+including when several files are supplied in one command. `--title` can override
+this. `experimental` is also accepted in place of `expermental`. Header spaces
+and capitalization are ignored. Both rates must be in **mm/s**.
+
+Each row contains the face indices `h,k,l` and the two corresponding rates.
+These face normals are interpreted in a **cubic** crystal, relative to (100).
+Keep one set of test conditions per file. A blank rate is skipped; both rates
+cannot be blank on the same row. Example values above are invented.
+
 ## Simple three-column CSV
 
 Create a plain-text file named `my_data.csv` in your Ubuntu editor:

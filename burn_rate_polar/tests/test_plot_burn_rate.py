@@ -2,13 +2,40 @@ import tempfile
 import unittest
 from pathlib import Path
 import sys
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
-from plot_burn_rate import angle_from_normal, group_conditions, load_measurements, parse_face
+from plot_burn_rate import angle_from_normal, group_conditions, load_measurements, parse_face, main
 
 
 class OrientationTests(unittest.TestCase):
+    def test_hkl_columns_and_header_spellings(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "My material.csv"
+            for header in ("h,k,l,expermental,simulated", " H , K , L , Experimental , Simulated "):
+                path.write_text(header + "\n1,1,0,2.5,2.6\n0,1,0,,3.0\n")
+                rows = load_measurements(path)
+                self.assertEqual(len(rows), 3)
+                self.assertEqual(rows[0].vector, (1, 1, 0))
+                self.assertEqual([row.rate for row in rows], [2.5, 2.6, 3.0])
+                self.assertEqual(rows[2].source, "simulation")
+
+    def test_cli_titles_each_plot_from_its_csv_filename(self):
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("My material.csv", "Other.run.csv")]
+            for path in paths:
+                path.write_text("h,k,l,expermental,simulated\n1,0,0,2,3\n")
+            argv = ["plot_burn_rate.py", *map(str, paths), "--output-dir", directory]
+            with patch.object(sys, "argv", argv), patch("plot_burn_rate.plot_condition") as plot:
+                main()
+            self.assertEqual([call.args[2] for call in plot.call_args_list],
+                             ["My material", "Other.run"])
+            with patch.object(sys, "argv", argv + ["--title", "Custom title"]), \
+                 patch("plot_burn_rate.plot_condition") as plot:
+                main()
+            self.assertTrue(all(call.args[2] == "Custom title" for call in plot.call_args_list))
+
     def test_face_formats(self):
         for text, expected in [("100", (1, 0, 0)), ("(110)", (1, 1, 0)),
                                ("010", (0, 1, 0)), ("(1,-1,0)", (1, -1, 0)),

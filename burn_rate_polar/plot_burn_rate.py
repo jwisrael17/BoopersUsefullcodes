@@ -16,6 +16,12 @@ REQUIRED = {
     "source", "u", "v", "w", "heat_flux_kw_m2", "cutoff_s", "burn_rate_mm_s"
 }
 SIMPLE_COLUMNS = {"face", "experimental_burn_rate", "simulated_burn_rate"}
+HKL_COLUMNS = {"h", "k", "l", "experimental_burn_rate", "simulated_burn_rate"}
+HEADER_ALIASES = {
+    "expermental": "experimental_burn_rate",
+    "experimental": "experimental_burn_rate",
+    "simulated": "simulated_burn_rate",
+}
 STYLES = {
     "experiment": {"color": "tab:blue", "marker": "o", "label": "Experiment"},
     "simulation": {"color": "tab:orange", "marker": "^", "label": "Simulation"},
@@ -48,8 +54,12 @@ def parse_face(text):
 
 
 def read_simple_row(row):
-    vector = parse_face(row["face"])
-    face = "(" + " ".join(str(x) for x in vector) + ")"
+    if "face" in row:
+        vector = parse_face(row["face"])
+    else:
+        vector = tuple(float(row[key]) for key in ("h", "k", "l"))
+        angle_from_normal(vector)
+    face = "(" + " ".join(f"{x:g}" for x in vector) + ")"
     measurements = []
     for source, column in (("experiment", "experimental_burn_rate"),
                            ("simulation", "simulated_burn_rate")):
@@ -84,9 +94,15 @@ def load_measurements(path):
     measurements = []
     with path.open(newline="", encoding="utf-8-sig") as stream:
         reader = csv.DictReader(stream)
+        reader.fieldnames = [HEADER_ALIASES.get(name.strip().lower(), name.strip().lower())
+                             for name in (reader.fieldnames or [])]
+        if len(reader.fieldnames) != len(set(reader.fieldnames)):
+            raise ValueError(f"{path}: duplicate column names")
         fields = set(reader.fieldnames or [])
-        simple = "face" in fields
-        missing = (SIMPLE_COLUMNS if simple else REQUIRED) - fields
+        hkl = bool(fields & {"h", "k", "l"})
+        simple = "face" in fields or hkl
+        columns = HKL_COLUMNS if hkl else (SIMPLE_COLUMNS if simple else REQUIRED)
+        missing = columns - fields
         if missing:
             raise ValueError(f"{path}: missing columns: {', '.join(sorted(missing))}")
         for line, row in enumerate(reader, start=2):
@@ -172,7 +188,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("inputs", nargs="+", type=Path, help="One or more measurement CSV files")
     parser.add_argument("--output-dir", type=Path, default=Path("polar_plots"))
-    parser.add_argument("--title", default="Burn rate vs. orientation")
+    parser.add_argument("--title", help="Override the default title (CSV filename without extension)")
     parser.add_argument("--normal", nargs=3, type=float, default=(1, 0, 0),
                         metavar=("NX", "NY", "NZ"), help="Reference normal in the same Cartesian frame")
     parser.add_argument("--reference-label", default="(100) normal")
@@ -197,7 +213,8 @@ def main():
                 if {row.source for row in rows} != set(STYLES):
                     print(f"Note: {path.name}{suffix}: "
                           "only one data source is present.")
-                plot_condition(rows, args.normal, args.title, args.reference_label,
+                plot_condition(rows, args.normal, args.title if args.title is not None else path.stem,
+                               args.reference_label,
                                output, not args.no_labels)
                 print(f"Saved {output}")
     except (ValueError, OSError) as exc:
