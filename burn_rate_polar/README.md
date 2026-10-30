@@ -1,0 +1,97 @@
+# Burn-rate orientation comparison
+
+Create polar scatter plots comparing experimental and simulation burn rates.
+Each input CSV is processed independently. Within each file, a separate plot is
+created for every exact heat-flux / laser-cutoff-time combination. Experiment
+uses blue circles and simulation uses orange triangles. Optional radial error
+bars and orientation-vector labels are included.
+
+## Install and run
+
+Run these commands from this directory:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python plot_burn_rate.py examples/comparison.csv --title "Example data"
+```
+
+The example is invented data. It produces two PNG files in `polar_plots/`.
+No display is required, so the script also works on a compute node.
+
+Copy `examples/comparison.csv` to a new filename and replace the measurements.
+Repeat the command for each dataset or process multiple files together:
+
+```bash
+python plot_burn_rate.py material_A.csv material_B.csv --output-dir results
+python plot_burn_rate.py material_A.csv --format svg --no-labels
+```
+
+Rerunning the same command replaces its generated plot files. Old files from
+conditions removed from the CSV are not deleted. Use a new output directory
+when you want to keep different versions. Input filenames must have distinct
+stems when processed together. Each file should represent one material and
+one consistent burn-rate measurement definition/window.
+
+## Input columns
+
+| Column | Meaning |
+| --- | --- |
+| `source` | `experiment` or `simulation` |
+| `u,v,w` | Three components of the burn-propagation direction |
+| `heat_flux_kw_m2` | Applied heat flux in kW/m² |
+| `cutoff_s` | Laser cutoff time in seconds, using the same time origin |
+| `burn_rate_mm_s` | Nonnegative burn rate in mm/s |
+| `rate_error_mm_s` | Optional symmetric error-bar half-width in mm/s; blank is allowed |
+
+The optional error column can be omitted entirely. Choose a consistent error
+definition (for example, standard deviation or a confidence-interval half-width)
+and state it in your figure caption. Each row is plotted separately; replicates
+are not averaged. Error bars extending below zero are rejected.
+
+`BurnRate.py` in the repository root reports m/s and in/s. Multiply its m/s
+results by **1000** before putting them in `burn_rate_mm_s`, and supply the
+orientation, heat flux, and cutoff metadata for each simulation yourself.
+
+## Orientation assumptions
+
+By default, vectors are crystallographic directions in a **cubic** crystal.
+The reference is +[100], the normal to (100). The plotted angle is
+`acos(dot(unit_direction, unit_normal))`. Vector magnitude does not matter;
+zero vectors are rejected. The angle ranges from 0 to 180 degrees, so opposite
+directions are not folded together. The plot displays 0–90 degrees if all
+directions fall in that range, otherwise 0–180 degrees.
+
+For a non-cubic crystal, first convert your crystallographic direction vectors
+and the reciprocal-lattice (100) normal into the **same Cartesian frame**.
+Supply the Cartesian directions in `u,v,w` and the Cartesian normal with:
+
+```bash
+python plot_burn_rate.py cartesian_data.csv --normal 1 0 0
+```
+
+Replace those normal components with the appropriate values for your frame.
+For another reference, also change `--reference-label "your reference"`.
+
+Different 3D vectors can have the same angle from the reference. This plot
+retains vector labels but does not preserve the azimuth about the normal.
+For a directional anisotropy curve, use directions in a specified rotation
+plane. Points are not connected because arbitrary directions need not lie
+along a common angular sweep.
+
+## Comparing test conditions
+
+Use the same units and condition values in both sources to overlay them.
+Conditions are matched exactly, without rounding or interpolation. An unmatched
+condition still produces a plot and prints a notice that only one source is
+present. A single file containing only experiment or only simulation is allowed.
+Do not interpret changing heat flux or cutoff time as an orientation effect.
+Use a consistent burn-rate measurement window (during heating, after cutoff,
+or a clearly defined interval) in both datasets.
+
+## Verification
+
+```bash
+python -m unittest discover -s tests -v
+```
