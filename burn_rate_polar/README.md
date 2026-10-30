@@ -25,6 +25,9 @@ this. `experimental` is also accepted in place of `expermental`. Header spaces
 and capitalization are ignored. Both rates must be in **mm/s**.
 
 Each row contains the face indices `h,k,l` and the two corresponding rates.
+Plots use a larger 12-by-10-inch figure. The radial axis starts at zero and
+ends 10% above the largest rate (including any error bar), without forcing a
+minimum upper limit of 1. If every rate is zero, the upper limit is 1.
 These face normals are interpreted in a **cubic** crystal, relative to (100).
 Keep one set of test conditions per file. A blank rate is skipped; both rates
 cannot be blank on the same row. Example values above are invented.

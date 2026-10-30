@@ -146,7 +146,7 @@ def group_conditions(measurements):
 
 
 def plot_condition(rows, normal, title, reference_label, output, annotate):
-    fig, ax = plt.subplots(figsize=(8, 7), subplot_kw={"projection": "polar"})
+    fig, ax = plt.subplots(figsize=(12, 10), subplot_kw={"projection": "polar"})
     angles = [angle_from_normal(row.vector, normal) for row in rows]
     limit = 90 if max(angles) <= np.pi / 2 + 1e-10 else 180
     radial_max = max(row.rate + (row.error or 0) for row in rows)
@@ -172,7 +172,8 @@ def plot_condition(rows, normal, title, reference_label, output, annotate):
     ax.set_thetamin(0)
     ax.set_thetamax(limit)
     ax.set_thetagrids(np.arange(0, limit + 1, 15))
-    ax.set_ylim(0, max(radial_max * 1.25, 1))
+    # Fit small rates too: a fixed minimum of 1 compresses them at the origin.
+    ax.set_ylim(0, radial_max * 1.10 if radial_max > 0 else 1)
     ax.grid(alpha=0.5)
     if rows[0].flux is not None:
         title += (f"\nHeat flux: {rows[0].flux:g} kW/m²; "
