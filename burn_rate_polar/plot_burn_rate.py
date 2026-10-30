@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -14,6 +15,7 @@ import numpy as np
 REQUIRED = {
     "source", "u", "v", "w", "heat_flux_kw_m2", "cutoff_s", "burn_rate_mm_s"
 }
+SIMPLE_COLUMNS = {"face", "experimental_burn_rate", "simulated_burn_rate"}
 STYLES = {
     "experiment": {"color": "tab:blue", "marker": "o", "label": "Experiment"},
     "simulation": {"color": "tab:orange", "marker": "^", "label": "Simulation"},
@@ -28,6 +30,39 @@ class Measurement:
     cutoff: float
     rate: float
     error: object = None
+    face: str = ""
+
+
+def parse_face(text):
+    """Read cubic faces like 110, (110), or a quoted '(1, -1, 0)'."""
+    text = text.strip().strip("()[]").strip()
+    if re.fullmatch(r"[0-9]{3}", text):
+        vector = tuple(int(x) for x in text)
+    else:
+        parts = re.split(r"[\s,]+", text)
+        if len(parts) != 3 or any(not re.fullmatch(r"[+-]?\d+", p) for p in parts):
+            raise ValueError("face must look like 100, (110), or a quoted '(1, -1, 0)'")
+        vector = tuple(int(p) for p in parts)
+    angle_from_normal(vector)
+    return vector
+
+
+def read_simple_row(row):
+    vector = parse_face(row["face"])
+    face = "(" + " ".join(str(x) for x in vector) + ")"
+    measurements = []
+    for source, column in (("experiment", "experimental_burn_rate"),
+                           ("simulation", "simulated_burn_rate")):
+        text = (row[column] or "").strip()
+        if not text:
+            continue
+        rate = float(text)
+        if not np.isfinite(rate) or rate < 0:
+            raise ValueError("Burn rates must be finite and nonnegative")
+        measurements.append(Measurement(source, vector, None, None, rate, face=face))
+    if not measurements:
+        raise ValueError("Provide at least one burn rate for each face")
+    return measurements
 
 
 def angle_from_normal(vector, normal=(1, 0, 0)):
@@ -49,11 +84,20 @@ def load_measurements(path):
     measurements = []
     with path.open(newline="", encoding="utf-8-sig") as stream:
         reader = csv.DictReader(stream)
-        missing = REQUIRED - set(reader.fieldnames or [])
+        fields = set(reader.fieldnames or [])
+        simple = "face" in fields
+        missing = (SIMPLE_COLUMNS if simple else REQUIRED) - fields
         if missing:
             raise ValueError(f"{path}: missing columns: {', '.join(sorted(missing))}")
         for line, row in enumerate(reader, start=2):
             try:
+                if None in row:
+                    raise ValueError("Too many columns; put faces containing commas inside double quotes")
+                if any(value is None for value in row.values()):
+                    raise ValueError("Missing columns in this row; keep empty fields as commas")
+                if simple:
+                    measurements.extend(read_simple_row(row))
+                    continue
                 source = row["source"].strip().lower()
                 if source not in STYLES:
                     raise ValueError("source must be experiment or simulation")
@@ -102,7 +146,7 @@ def plot_condition(rows, normal, title, reference_label, output, annotate):
                 ax.errorbar(angle, row.rate, yerr=row.error, fmt="none",
                             ecolor=style["color"], capsize=3)
             if annotate:
-                label = "[" + ", ".join(f"{x:g}" for x in row.vector) + "]"
+                label = row.face or ("[" + ", ".join(f"{x:g}" for x in row.vector) + "]")
                 offset = 8 if source == "experiment" else -15
                 if angle < 1e-10 and source == "simulation":
                     offset = 24  # Keep endpoint labels clear of radial tick labels.
@@ -114,8 +158,10 @@ def plot_condition(rows, normal, title, reference_label, output, annotate):
     ax.set_thetagrids(np.arange(0, limit + 1, 15))
     ax.set_ylim(0, max(radial_max * 1.25, 1))
     ax.grid(alpha=0.5)
-    ax.set_title(f"{title}\nHeat flux: {rows[0].flux:g} kW/m²; "
-                 f"laser cutoff: {rows[0].cutoff:g} s", pad=30)
+    if rows[0].flux is not None:
+        title += (f"\nHeat flux: {rows[0].flux:g} kW/m²; "
+                  f"laser cutoff: {rows[0].cutoff:g} s")
+    ax.set_title(title, pad=30)
     ax.set_xlabel(f"Angle from {reference_label}\nRadius: burn rate (mm/s)", labelpad=25)
     ax.legend(loc="upper left", bbox_to_anchor=(1.02, 1))
     fig.savefig(output, dpi=300, bbox_inches="tight")
@@ -145,11 +191,11 @@ def main():
             groups = group_conditions(measurements)
             for index, (condition, rows) in enumerate(sorted(groups.items()), start=1):
                 flux, cutoff = condition
-                output = args.output_dir / (
-                    f"{path.stem}_{index:03d}_flux-{flux:g}_cutoff-{cutoff:g}.{args.format}"
-                )
+                suffix = (f"_{index:03d}_flux-{flux:g}_cutoff-{cutoff:g}"
+                          if flux is not None else "_polar")
+                output = args.output_dir / f"{path.stem}{suffix}.{args.format}"
                 if {row.source for row in rows} != set(STYLES):
-                    print(f"Note: {path.name}, flux={flux:g}, cutoff={cutoff:g}: "
+                    print(f"Note: {path.name}{suffix}: "
                           "only one data source is present.")
                 plot_condition(rows, args.normal, args.title, args.reference_label,
                                output, not args.no_labels)

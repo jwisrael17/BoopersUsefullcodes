@@ -5,10 +5,38 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import numpy as np
-from plot_burn_rate import angle_from_normal, group_conditions, load_measurements
+from plot_burn_rate import angle_from_normal, group_conditions, load_measurements, parse_face
 
 
 class OrientationTests(unittest.TestCase):
+    def test_face_formats(self):
+        for text, expected in [("100", (1, 0, 0)), ("(110)", (1, 1, 0)),
+                               ("010", (0, 1, 0)), ("(1,-1,0)", (1, -1, 0)),
+                               ("[10 1 0]", (10, 1, 0))]:
+            self.assertEqual(parse_face(text), expected)
+        for text in ("000", "10", "1010", "abc"):
+            with self.assertRaises(ValueError):
+                parse_face(text)
+
+    def test_simple_format_keeps_both_sources_in_one_plot(self):
+        path = Path(__file__).resolve().parents[1] / "examples" / "faces.csv"
+        measurements = load_measurements(path)
+        self.assertEqual(len(measurements), 10)
+        self.assertEqual(set(group_conditions(measurements)), {(None, None)})
+        self.assertEqual(measurements[-1].vector, (0, 1, 0))
+        self.assertEqual(measurements[0].rate, 2.0)
+        self.assertEqual(measurements[1].rate, 2.1)
+
+    def test_simple_missing_rate_and_quoted_face(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "faces.csv"
+            path.write_text('face,experimental_burn_rate,simulated_burn_rate\n'
+                            '"(1,-1,0)",,2.5\n')
+            rows = load_measurements(path)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0].source, "simulation")
+            self.assertEqual(rows[0].vector, (1, -1, 0))
+
     def test_known_directions_and_scaling(self):
         for vector, angle in [([1, 0, 0], 0), ([1, 1, 0], 45),
                               ([1, 1, 1], 54.735610317), ([0, 1, 0], 90),

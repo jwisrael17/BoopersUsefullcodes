@@ -1,5 +1,47 @@
 # Burn-rate orientation comparison
 
+## Simple three-column CSV
+
+Create a plain-text file named `my_data.csv` in your Ubuntu editor:
+
+```csv
+face,experimental_burn_rate,simulated_burn_rate
+100,2.0,2.1
+110,2.5,2.6
+111,2.7,2.8
+010,3.0,2.9
+```
+
+These are example values. Enter both burn rates in **mm/s**, then run:
+
+```bash
+python3 plot_burn_rate.py my_data.csv
+```
+
+This saves `polar_plots/my_data_polar.png`, with experiment and simulation on
+the same polar graph. Run again after editing your data. For several plots:
+
+```bash
+python3 plot_burn_rate.py material_A.csv material_B.csv
+```
+
+Each simple CSV produces one plot. Keep the test conditions and rate measurement
+definition consistent within each file. The simple format does not record or
+check heat flux and cutoff time; use separate files for different conditions.
+The extended format below can group conditions automatically.
+
+Faces are **cubic crystal plane indices**, with the angle between each face's
+normal and the (100) normal. This assumes burning along the face normal.
+Different faces can have the same angle; labels retain the individual indices.
+For non-cubic materials use the Cartesian-vector extended format below instead.
+Write `010` as shown to retain its leading zero. `(110)` is also accepted.
+For negative or multi-digit indices, use spaces, for example `(1 -1 0)` or
+`(10 1 0)`. Faces containing commas must be quoted: `"(1,-1,0)"`.
+Leave a rate blank if unavailable, retaining the comma. Blank rates are skipped,
+not treated as zero. Both rates cannot be blank in the same row.
+
+## Extended format
+
 Create polar scatter plots comparing experimental and simulation burn rates.
 Each input CSV is processed independently. Within each file, a separate plot is
 created for every exact heat-flux / laser-cutoff-time combination. Experiment
